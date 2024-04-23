@@ -53,52 +53,52 @@ typedef struct IniValue {
     };
 } IniValue;
 
-static void save_global_ini_value(const char *filename, const char *section, const char *key, IniValue val, const char *comment = nullptr) {
+static void save_global_ini_value(class Local_Storage *local_storage, const char *filename, const char *section, const char *key, IniValue val, const char *comment = nullptr) {
     CSimpleIniA new_ini{};
     new_ini.SetUnicode();
     new_ini.SetSpaces(false);
 
-    auto fullpath = utf8_decode(Local_Storage::get_user_appdata_path() + Local_Storage::settings_storage_folder + PATH_SEPARATOR + filename);
-    if (!common_helpers::create_dir(fullpath)) return;
+    auto sz = local_storage->data_settings_size(filename);
+    if (sz > 0) {
+        std::vector<char> ini_file_data(sz);
+        auto read = local_storage->get_data_settings(filename, &ini_file_data[0], ini_file_data.size());
+        if (read == sz) {
+            new_ini.LoadData(&ini_file_data[0], ini_file_data.size());
+        }
+    }
 
-    std::ifstream ini_file( fullpath, std::ios::binary | std::ios::in);
-    if (ini_file.is_open()) {
-        new_ini.LoadData(ini_file);
-        ini_file.close();
+    std::string comment_str{};
+    if (comment && comment[0]) {
+        comment_str.append("# ").append(comment);
+        comment = comment_str.c_str();
     }
     
-    std::ofstream new_ini_file( fullpath, std::ios::binary | std::ios::out);
-    if (new_ini_file.is_open()) {
-        std::string comment_str{};
-        if (comment) {
-            comment_str.append("# ").append(comment);
-            comment = comment_str.c_str();
-        }
-        
-        switch (val.type)
-        {
-        case IniValue::Type::STR:
-            new_ini.SetValue(section, key, val.val_str, comment);
-        break;
-        
-        case IniValue::Type::BOOL:
-            new_ini.SetBoolValue(section, key, val.val_bool, comment);
-        break;
+    switch (val.type)
+    {
+    case IniValue::Type::STR:
+        new_ini.SetValue(section, key, val.val_str, comment);
+    break;
+    
+    case IniValue::Type::BOOL:
+        new_ini.SetBoolValue(section, key, val.val_bool, comment);
+    break;
 
-        case IniValue::Type::DOUBLE:
-            new_ini.SetDoubleValue(section, key, val.val_double, comment);
-        break;
+    case IniValue::Type::DOUBLE:
+        new_ini.SetDoubleValue(section, key, val.val_double, comment);
+    break;
 
-        case IniValue::Type::LONG:
-            new_ini.SetLongValue(section, key, val.val_long, comment);
-        break;
+    case IniValue::Type::LONG:
+        new_ini.SetLongValue(section, key, val.val_long, comment);
+    break;
 
-        default: break;
-        }
-
-        new_ini.Save(new_ini_file, false);
-        new_ini_file.close();
+    default: break;
     }
+
+    std::string ini_buff{};
+    if (new_ini.Save(ini_buff, false) == SI_OK) {
+        local_storage->store_data_settings(filename, &ini_buff[0], ini_buff.size());
+    }
+    
 }
 
 static void merge_ini(const CSimpleIniA &new_ini, bool overwrite = false) {
@@ -507,6 +507,9 @@ static bool parse_local_save(std::string &save_path)
     if (!ptr || !ptr[0]) return false;
     
     save_path = common_helpers::to_absolute(common_helpers::string_strip(Settings::sanitize(ptr)), Local_Storage::get_program_path());
+    if (save_path.size() && save_path.back() != *PATH_SEPARATOR) {
+        save_path.push_back(*PATH_SEPARATOR);
+    }
     PRINT_DEBUG("using local save path '%s'", save_path.c_str());
     return true;
 }
@@ -518,6 +521,7 @@ static uint16 parse_listen_port(class Local_Storage *local_storage)
     if (port == 0) {
         port = DEFAULT_PORT;
         save_global_ini_value(
+            local_storage,
             config_ini_main,
             "main::connectivity", "listen_port", IniValue((long)port),
             "change the UDP/TCP port the emulator listens on"
@@ -533,6 +537,7 @@ static std::string parse_account_name(class Local_Storage *local_storage)
     if (!name || !name[0]) {
         name = DEFAULT_NAME;
         save_global_ini_value(
+            local_storage,
             config_ini_user,
             "user::general", "account_name", IniValue(name),
             "user account name"
@@ -551,6 +556,7 @@ static CSteamID parse_user_steam_id(class Local_Storage *local_storage)
         char temp_text[32]{};
         snprintf(temp_text, sizeof(temp_text), "%llu", (uint64)user_id.ConvertToUint64());
         save_global_ini_value(
+            local_storage,
             config_ini_user,
             "user::general", "account_steamid", IniValue(temp_text),
             "Steam64 format"
@@ -568,6 +574,7 @@ static std::string parse_current_language(class Local_Storage *local_storage)
     if (!lang || !lang[0]) {
         lang = DEFAULT_LANGUAGE;
         save_global_ini_value(
+            local_storage,
             config_ini_user,
             "user::general", "language", IniValue(lang),
             "the language reported to the game, default is 'english', check 'API language code' in https://partner.steamgames.com/doc/store/localization/languages"
@@ -1136,12 +1143,13 @@ static void parse_auto_accept_invite(class Settings *settings_client, class Sett
 }
 
 // user::general::ip_country
-static void parse_ip_country(class Settings *settings_client, class Settings *settings_server)
+static void parse_ip_country(class Local_Storage *local_storage, class Settings *settings_client, class Settings *settings_server)
 {
     std::string line(common_helpers::to_upper(common_helpers::string_strip(ini.GetValue("user::general", "ip_country", ""))));
     if (line.empty()) {
             line = DEFAULT_IP_COUNTRY;
             save_global_ini_value(
+                local_storage,
                 config_ini_user,
                 "user::general", "ip_country", IniValue(line.c_str()),
                 "ISO 3166-1-alpha-2 format, use this link to get the 'Alpha-2' country code: https://www.iban.com/country-codes"
@@ -1283,7 +1291,77 @@ static void parse_simple_features(class Settings *settings_client, class Setting
 }
 
 
+
 static std::map<SettingsItf, std::string> old_itfs_map{};
+
+static bool try_parse_old_steam_interfaces_file(std::string interfaces_path)
+{
+    std::ifstream input( utf8_decode(interfaces_path) );
+    if (!input.is_open()) return false;
+
+    PRINT_DEBUG("Trying to parse old steam interfaces from '%s'", interfaces_path.c_str());
+    for( std::string line; std::getline( input, line ); ) {
+        line.erase(std::remove(line.begin(), line.end(), ' '), line.end());
+        line.erase(std::remove(line.begin(), line.end(), '\n'), line.end());
+        line.erase(std::remove(line.begin(), line.end(), '\r'), line.end());
+        line.erase(std::remove(line.begin(), line.end(), '\t'), line.end());
+        PRINT_DEBUG("  valid line: |%s|", line.c_str());
+
+#define OLD_ITF_LINE(istr, itype) {                 \
+    if (line.find(istr) != std::string::npos) {     \
+        old_itfs_map[itype] = line;                 \
+        continue;                                   \
+    }                                               \
+}
+
+        OLD_ITF_LINE("SteamClient", SettingsItf::CLIENT);
+
+        // NOTE: you must try to read the one with the most characters first
+        OLD_ITF_LINE("SteamGameServerStats", SettingsItf::GAMESERVER_STATS);
+        OLD_ITF_LINE("SteamGameServer", SettingsItf::GAMESERVER);
+
+        // NOTE: you must try to read the one with the most characters first
+        OLD_ITF_LINE("SteamMatchMakingServers", SettingsItf::MATCHMAKING_SERVERS);
+        OLD_ITF_LINE("SteamMatchMaking", SettingsItf::MATCHMAKING);
+
+        OLD_ITF_LINE("SteamUser", SettingsItf::USER);
+        OLD_ITF_LINE("SteamFriends", SettingsItf::FRIENDS);
+        OLD_ITF_LINE("SteamUtils", SettingsItf::UTILS);
+        OLD_ITF_LINE("STEAMUSERSTATS_INTERFACE_VERSION", SettingsItf::USER_STATS);
+        OLD_ITF_LINE("STEAMAPPS_INTERFACE_VERSION", SettingsItf::APPS);
+        OLD_ITF_LINE("SteamNetworking", SettingsItf::NETWORKING);
+        OLD_ITF_LINE("STEAMREMOTESTORAGE_INTERFACE_VERSION", SettingsItf::REMOTE_STORAGE);
+        OLD_ITF_LINE("STEAMSCREENSHOTS_INTERFACE_VERSION", SettingsItf::SCREENSHOTS);
+        OLD_ITF_LINE("STEAMHTTP_INTERFACE_VERSION", SettingsItf::HTTP);
+        OLD_ITF_LINE("STEAMUNIFIEDMESSAGES_INTERFACE_VERSION", SettingsItf::UNIFIED_MESSAGES);
+
+        OLD_ITF_LINE("STEAMCONTROLLER_INTERFACE_VERSION", SettingsItf::CONTROLLER);
+        OLD_ITF_LINE("SteamController", SettingsItf::CONTROLLER);
+
+        OLD_ITF_LINE("STEAMUGC_INTERFACE_VERSION", SettingsItf::UGC);
+        OLD_ITF_LINE("STEAMAPPLIST_INTERFACE_VERSION", SettingsItf::APPLIST);
+        OLD_ITF_LINE("STEAMMUSIC_INTERFACE_VERSION", SettingsItf::MUSIC);
+        OLD_ITF_LINE("STEAMMUSICREMOTE_INTERFACE_VERSION", SettingsItf::MUSIC_REMOTE);
+        OLD_ITF_LINE("STEAMHTMLSURFACE_INTERFACE_VERSION", SettingsItf::HTML_SURFACE);
+        OLD_ITF_LINE("STEAMINVENTORY_INTERFACE", SettingsItf::INVENTORY);
+        OLD_ITF_LINE("STEAMVIDEO_INTERFACE", SettingsItf::VIDEO);
+        OLD_ITF_LINE("SteamMasterServerUpdater", SettingsItf::MASTERSERVER_UPDATER);
+
+#undef OLD_ITF_LINE
+
+        PRINT_DEBUG("  NOT REPLACED |%s|", line.c_str());
+    }
+
+    return true;
+}
+
+static void parse_old_steam_interfaces()
+{
+    if (!try_parse_old_steam_interfaces_file(Local_Storage::get_game_settings_path() + "steam_interfaces.txt") &&
+        !try_parse_old_steam_interfaces_file(Local_Storage::get_program_path() + "steam_interfaces.txt")) {
+        PRINT_DEBUG("Couldn't load steam_interfaces.txt");
+    }
+}
 
 static void load_all_config_settings()
 {
@@ -1315,7 +1393,7 @@ static void load_all_config_settings()
 
             auto err = local_ini.LoadData(local_ini_file);
             local_ini_file.close();
-            PRINT_DEBUG("result of parsing local '%s' %i (success == 0)", config_file, (int)err);
+            PRINT_DEBUG("result of parsing ini in local settings '%s' %i (success == 0)", config_file, (int)err);
             if (err == SI_OK) {
                 merge_ini(local_ini);
             }
@@ -1328,18 +1406,43 @@ static void load_all_config_settings()
         }
     }
 
-    // now we can access get_user_appdata_path() which might have been changed by the above code
-    {
+    std::string local_save_folder{};
+    if (parse_local_save(local_save_folder) && local_save_folder.size()) {
+        CSimpleIniA local_ini{};
+        local_ini.SetUnicode();
+
+        for (const auto &config_file : config_files) {
+            std::ifstream local_ini_file( utf8_decode(local_save_folder + Local_Storage::settings_storage_folder + PATH_SEPARATOR + config_file), std::ios::binary | std::ios::in);
+            if (!local_ini_file.is_open()) continue;
+
+            auto err = local_ini.LoadData(local_ini_file);
+            local_ini_file.close();
+            PRINT_DEBUG("result of parsing ini in local save '%s' %i (success == 0)", config_file, (int)err);
+            if (err == SI_OK) {
+                merge_ini(local_ini, true);
+            }
+        }
+        
+        std::string saves_folder_name(common_helpers::string_strip(Settings::sanitize(local_ini.GetValue("user::saves", "saves_folder_name", ""))));
+        if (saves_folder_name.size()) {
+            Local_Storage::set_saves_folder_name(saves_folder_name);
+            PRINT_DEBUG("changed base folder for save data to '%s'", saves_folder_name.c_str());
+        }
+        
+        PRINT_DEBUG("global settings will be ignored since local save is being used");
+
+    } else { // only read global folder if we're not using local save
         CSimpleIniA global_ini{};
         global_ini.SetUnicode();
-
+        
+        // now we can access get_user_appdata_path() which might have been changed by the above code
         for (const auto &config_file : config_files) {
             std::ifstream ini_file( utf8_decode(Local_Storage::get_user_appdata_path() + Local_Storage::settings_storage_folder + PATH_SEPARATOR + config_file), std::ios::binary | std::ios::in);
             if (!ini_file.is_open()) continue;
             
             auto err = global_ini.LoadData(ini_file);
             ini_file.close();
-            PRINT_DEBUG("result of parsing global '%s' %i (success == 0)", config_file, (int)err);
+            PRINT_DEBUG("result of parsing global ini '%s' %i (success == 0)", config_file, (int)err);
             
             if (err == SI_OK) {
                 merge_ini(global_ini);
@@ -1347,30 +1450,7 @@ static void load_all_config_settings()
         }
     }
 
-    old_itfs_map[SettingsItf::CLIENT] = ini.GetValue("app::steam_interfaces", "client", "");
-    old_itfs_map[SettingsItf::GAMESERVER_STATS] = ini.GetValue("app::steam_interfaces", "gameserver_stats", "");
-    old_itfs_map[SettingsItf::GAMESERVER] = ini.GetValue("app::steam_interfaces", "gameserver", "");
-    old_itfs_map[SettingsItf::MATCHMAKING_SERVERS] = ini.GetValue("app::steam_interfaces", "matchmaking_servers", "");
-    old_itfs_map[SettingsItf::MATCHMAKING] = ini.GetValue("app::steam_interfaces", "matchmaking", "");
-    old_itfs_map[SettingsItf::USER] = ini.GetValue("app::steam_interfaces", "user", "");
-    old_itfs_map[SettingsItf::FRIENDS] = ini.GetValue("app::steam_interfaces", "friends", "");
-    old_itfs_map[SettingsItf::UTILS] = ini.GetValue("app::steam_interfaces", "utils", "");
-    old_itfs_map[SettingsItf::USER_STATS] = ini.GetValue("app::steam_interfaces", "user_stats", "");
-    old_itfs_map[SettingsItf::APPS] = ini.GetValue("app::steam_interfaces", "apps", "");
-    old_itfs_map[SettingsItf::NETWORKING] = ini.GetValue("app::steam_interfaces", "networking", "");
-    old_itfs_map[SettingsItf::REMOTE_STORAGE] = ini.GetValue("app::steam_interfaces", "remote_storage", "");
-    old_itfs_map[SettingsItf::SCREENSHOTS] = ini.GetValue("app::steam_interfaces", "screenshots", "");
-    old_itfs_map[SettingsItf::HTTP] = ini.GetValue("app::steam_interfaces", "http", "");
-    old_itfs_map[SettingsItf::UNIFIED_MESSAGES] = ini.GetValue("app::steam_interfaces", "unified_messages", "");
-    old_itfs_map[SettingsItf::CONTROLLER] = ini.GetValue("app::steam_interfaces", "controller", "");
-    old_itfs_map[SettingsItf::UGC] = ini.GetValue("app::steam_interfaces", "ugc", "");
-    old_itfs_map[SettingsItf::APPLIST] = ini.GetValue("app::steam_interfaces", "applist", "");
-    old_itfs_map[SettingsItf::MUSIC] = ini.GetValue("app::steam_interfaces", "music", "");
-    old_itfs_map[SettingsItf::MUSIC_REMOTE] = ini.GetValue("app::steam_interfaces", "music_remote", "");
-    old_itfs_map[SettingsItf::HTML_SURFACE] = ini.GetValue("app::steam_interfaces", "html_surface", "");
-    old_itfs_map[SettingsItf::INVENTORY] = ini.GetValue("app::steam_interfaces", "inventory", "");
-    old_itfs_map[SettingsItf::VIDEO] = ini.GetValue("app::steam_interfaces", "video", "");
-    old_itfs_map[SettingsItf::MASTERSERVER_UPDATER] = ini.GetValue("app::steam_interfaces", "masterserver_updater", "");
+    parse_old_steam_interfaces();
 
 #ifndef EMU_RELEASE_BUILD
     // dump the final ini file
@@ -1443,6 +1523,9 @@ uint32 create_localstorage_settings(Settings **settings_client_out, Settings **s
     std::set<std::string> supported_languages(parse_supported_languages(local_storage, language));
 
     bool steam_offline_mode = ini.GetBoolValue("main::connectivity", "offline", false);
+    if (steam_offline_mode) {
+        PRINT_DEBUG("setting emu to offline mode");
+    }
     Settings *settings_client = new Settings(user_id, CGameID(appid), name, language, steam_offline_mode);
     Settings *settings_server = new Settings(generate_steam_id_server(), CGameID(appid), name, language, steam_offline_mode);
 
@@ -1478,7 +1561,7 @@ uint32 create_localstorage_settings(Settings **settings_client_out, Settings **s
     parse_mods_folder(settings_client, settings_server, local_storage);
     load_gamecontroller_settings(settings_client);
     parse_auto_accept_invite(settings_client, settings_server);
-    parse_ip_country(settings_client, settings_server);
+    parse_ip_country(local_storage, settings_client, settings_server);
 
     parse_overlay_general_config(settings_client, settings_server);
     load_overlay_appearance(settings_client, settings_server, local_storage);
@@ -1492,15 +1575,17 @@ uint32 create_localstorage_settings(Settings **settings_client_out, Settings **s
     return appid;
 }
 
-void save_global_settings(const char *name, const char *language)
+void save_global_settings(class Local_Storage *local_storage, const char *name, const char *language)
 {
     save_global_ini_value(
+        local_storage,
         config_ini_user,
         "user::general", "account_name", IniValue(name),
         "user account name"
     );
     
     save_global_ini_value(
+        local_storage,
         config_ini_user,
         "user::general", "language", IniValue(language),
         "the language reported to the game, default is 'english', check 'API language code' in https://partner.steamgames.com/doc/store/localization/languages"
