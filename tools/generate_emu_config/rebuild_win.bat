@@ -6,7 +6,8 @@ pushd "%~dp0"
 set "venv=.env-win"
 set "out_dir=bin\win"
 set "build_temp_dir=bin\tmp\win"
-set "icon_file=icon\Froyoshark-Enkel-Steam.ico"
+:: relative to build_temp_dir
+set "icon_file=..\..\..\icon\Froyoshark-Enkel-Steam.ico"
 set "signer_tool=..\..\third-party\build\win\cert\sign_helper.bat"
 
 set /a last_code=0
@@ -31,21 +32,21 @@ del /f /q "*.spec"
 call "%venv%\Scripts\activate.bat"
 
 echo building generate_emu_config...
-pyinstaller "generate_emu_config.py" --distpath "%out_dir%" -y --clean --onedir --name "generate_emu_config" --noupx --console -i "%icon_file%" --workpath "%build_temp_dir%" --collect-submodules "steam" || (
+pyinstaller "generate_emu_config.py" --distpath "%out_dir%" -y --clean --onedir --name "generate_emu_config" --noupx --console -i "%icon_file%" --collect-submodules "steam" --workpath "%build_temp_dir%" --specpath "%build_temp_dir%" || (
     set /a last_code=1
     goto :script_end
 )
 call "%signer_tool%" "%out_dir%\generate_emu_config\generate_emu_config.exe"
 
 echo building parse_controller_vdf...
-pyinstaller "controller_config_generator\parse_controller_vdf.py" --distpath "%out_dir%" -y --clean --onedir --name "parse_controller_vdf" --noupx --console -i "NONE" --workpath "%build_temp_dir%" || (
+pyinstaller "controller_config_generator\parse_controller_vdf.py" --distpath "%out_dir%" -y --clean --onedir --name "parse_controller_vdf" --noupx --console -i "NONE" --workpath "%build_temp_dir%" --specpath "%build_temp_dir%" || (
     set /a last_code=1
     goto :script_end
 )
 call "%signer_tool%" "%out_dir%\parse_controller_vdf\parse_controller_vdf.exe"
 
 echo building parse_achievements_schema...
-pyinstaller "stats_schema_achievement_gen\achievements_gen.py" --distpath "%out_dir%" -y --clean --onedir --name "parse_achievements_schema" --noupx --console -i "NONE" --workpath "%build_temp_dir%" || (
+pyinstaller "stats_schema_achievement_gen\achievements_gen.py" --distpath "%out_dir%" -y --clean --onedir --name "parse_achievements_schema" --noupx --console -i "NONE" --workpath "%build_temp_dir%" --specpath "%build_temp_dir%" || (
     set /a last_code=1
     goto :script_end
 )

@@ -801,11 +801,11 @@ void Steam_Overlay::build_friend_window(Friend const& frd, friend_window_state& 
         ImGui::PushID((const char *)&frd_id, (const char *)&frd_id + sizeof(frd_id));
         ImGui::PushItemWidth(wnd_width);
 
-        if (ImGui::InputText("##chat_line", state.chat_input, max_chat_len, ImGuiInputTextFlags_EnterReturnsTrue))
-        {
+        if (ImGui::InputText("##chat_line", state.chat_input, max_chat_len, ImGuiInputTextFlags_EnterReturnsTrue)) {
             send_chat_msg = true;
             ImGui::SetKeyboardFocusHere(-1);
         }
+        
         ImGui::PopItemWidth();
         ImGui::PopID();
 
@@ -840,7 +840,6 @@ void Steam_Overlay::set_next_notification_pos(float width, float height, float e
     
     auto &global_style = ImGui::GetStyle();
     const float padding_all_sides = 2 * (global_style.WindowPadding.y + global_style.WindowPadding.x);
-    PRINT_DEBUG("%f", padding_all_sides);
 
     const float msg_height = ImGui::CalcTextSize(
         noti.message.c_str(),
@@ -963,6 +962,7 @@ void Steam_Overlay::build_notifications(int width, int height)
     auto now = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch());
     std::queue<Friend> friend_actions_temp{};
 
+    ImGui::PushFont(font_notif);
     // Add window rounding
     ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, settings->overlay_appearance.notification_rounding);
    
@@ -1063,6 +1063,7 @@ void Steam_Overlay::build_notifications(int width, int height)
     }
 
     ImGui::PopStyleVar();
+    ImGui::PopFont();
 
     // erase all notifications whose visible time exceeded the max
     notifications.erase(std::remove_if(notifications.begin(), notifications.end(), [this, &now](Notification &item) {
@@ -1215,9 +1216,7 @@ void Steam_Overlay::overlay_render_proc()
     }
 
     if (notifications.size()) {
-        ImGui::PushFont(font_notif);
         build_notifications(io.DisplaySize.x, io.DisplaySize.y);
-        ImGui::PopFont();
     }
 
 }
@@ -1236,6 +1235,7 @@ void Steam_Overlay::render_main_window()
     // think of it as translating "Protobuf - Google"
     windowTitle.append("Ingame Overlay project - Nemirtingas (").append(tmp).append(")");
 
+    int style_color_stack = 0;
     if ((settings->overlay_appearance.background_r >= 0) &&
         (settings->overlay_appearance.background_g >= 0) &&
         (settings->overlay_appearance.background_b >= 0) &&
@@ -1247,6 +1247,7 @@ void Steam_Overlay::render_main_window()
             settings->overlay_appearance.background_a
         );
         ImGui::PushStyleColor(ImGuiCol_WindowBg, colorSet);
+        style_color_stack += 1;
     }
 
     if ((settings->overlay_appearance.element_r >= 0) &&
@@ -1263,6 +1264,7 @@ void Steam_Overlay::render_main_window()
         ImGui::PushStyleColor(ImGuiCol_Button, colorSet);
         ImGui::PushStyleColor(ImGuiCol_FrameBg, colorSet);
         ImGui::PushStyleColor(ImGuiCol_ResizeGrip, colorSet);
+        style_color_stack += 4;
     }
 
     if ((settings->overlay_appearance.element_hovered_r >= 0) &&
@@ -1279,6 +1281,7 @@ void Steam_Overlay::render_main_window()
         ImGui::PushStyleColor(ImGuiCol_FrameBgHovered, colorSet);
         ImGui::PushStyleColor(ImGuiCol_ResizeGripHovered, colorSet);
         ImGui::PushStyleColor(ImGuiCol_HeaderHovered, colorSet);
+        style_color_stack += 4;
     }
 
     if ((settings->overlay_appearance.element_active_r >= 0) &&
@@ -1296,6 +1299,7 @@ void Steam_Overlay::render_main_window()
         ImGui::PushStyleColor(ImGuiCol_ResizeGripActive, colorSet);
         ImGui::PushStyleColor(ImGuiCol_Header, colorSet);
         ImGui::PushStyleColor(ImGuiCol_HeaderActive, colorSet);
+        style_color_stack += 5;
     }
 
     if (ImGui::Begin(windowTitle.c_str(), &show,
@@ -1369,6 +1373,7 @@ void Steam_Overlay::render_main_window()
                     if (ImGui::IsItemClicked() && ImGui::IsMouseDoubleClicked(0)) {
                         i.second.window_state |= window_state_show;
                     }
+
                     ImGui::PopID();
 
                     build_friend_window(i.first, i.second);
@@ -1496,9 +1501,11 @@ void Steam_Overlay::render_main_window()
             if (ImGui::Begin(URL_WINDOW_NAME, &show)) {
                 ImGui::Text("%s", translationSteamOverlayURL[current_language]);
                 ImGui::Spacing();
+
                 ImGui::PushItemWidth(ImGui::CalcTextSize(url.c_str()).x + 20);
                 ImGui::InputText("##url_copy", (char *)url.data(), url.size(), ImGuiInputTextFlags_ReadOnly);
                 ImGui::PopItemWidth();
+                
                 ImGui::Spacing();
                 if (ImGui::Button(translationClose[current_language]) || !show)
                     show_url = "";
@@ -1535,6 +1542,7 @@ void Steam_Overlay::render_main_window()
 
     ImGui::End();
 
+    if (style_color_stack) ImGui::PopStyleColor(style_color_stack);
     ImGui::PopFont();
 
     if (!show) ShowOverlay(false);
